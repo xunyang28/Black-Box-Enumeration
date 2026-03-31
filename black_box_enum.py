@@ -5,7 +5,7 @@
 
 import argparse
 import subprocess
-import json
+import re
 import os
 from datetime import datetime
 
@@ -61,12 +61,32 @@ def ensure_output_dir(path):
     """Create output directory if it doesn't exist."""
     os.makedirs(path, exist_ok=True)
 
+def clean_version(version_str):
+    """
+    Extract just the product name and version number.
+    e.g. "OpenSSH 5.3 (protocol 2.0)"  -> "OpenSSH 5.3"
+         "Apache httpd 2.2.15 (CentOS)" -> "Apache httpd 2.2.15"
+         "Asterisk Call Manager 1.3"     -> "Asterisk Call Manager 1.3"
+    """
+    if not version_str:
+        return ""
+ 
+    # Match everything up to and including the first version number (x.x or x.x.x)
+    match = re.match(r"^(.*?\d+\.\d+[\.\d]*)", version_str)
+    if match:
+        return match.group(1).strip()
+ 
+    # Fallback: return first 3 words if no version number pattern found
+    words = version_str.split()
+    return " ".join(words[:3])
+
 # ── PARSE OUTPUT ───────────────────────────────────────
  
 def parse_nmap(raw):
     """Extract only the port table from nmap output."""
     lines  = raw.splitlines()
     result = []
+    services = []
  
     for line in lines:
         stripped = line.strip()
@@ -83,12 +103,24 @@ def parse_nmap(raw):
                 first_token.endswith("tcp") or first_token.endswith("udp")
             ):
                 result.append(line)
- 
-    return "\n".join(result) if result else "No open ports found."
+
+                parts = stripped.split()
+                port = parts[0] if len(parts) > 0 else ""
+                version = " ".join(parts[3:]) if len(parts) > 3 else ""
+
+                clean_ver = clean_version(version)
+
+                services.append({
+                    "port"    : port,
+                    "version" : clean_ver
+                })
+    
+    cleaned = "\n".join(result) if result else "No open ports found."
+    return cleaned, services
 
 # ── REPORTER ────────────────────────────────────────────────
 
-def save_report(target, nmap_output, output_dir):
+def save_report(target, nmap_output, exploit_findings, output_dir):
     """Save results """
 
     ensure_output_dir(output_dir)
@@ -118,6 +150,18 @@ def save_report(target, nmap_output, output_dir):
             f.write("No results.\n")
         f.write("\n")
 
+        # Searchsploit results
+        f.write("[SEARCHSPLOIT — EXPLOIT FINDINGS]\n")
+        f.write("-" * 60 + "\n")
+        if exploit_findings:
+            for service_key, output in exploit_findings.items():
+                f.write(f"\n  >> {service_key}\n")
+                f.write("  " + "-" * 40 + "\n")
+                f.write(output + "\n")
+        else:
+            f.write("  No exploits found for discovered services.\n")
+        f.write("\n")
+
         f.write("=" * 60 + "\n")
         f.write("  END OF REPORT\n")
         f.write("=" * 60 + "\n")
@@ -128,7 +172,7 @@ def save_report(target, nmap_output, output_dir):
  
 def port_scan(target):
     """Run nmap port scan against target."""
-    info(f"Starting port scan on {target} ...")
+    info(f"Starting port scan on {target} ... \n")
  
     if not check_tool("nmap"):
         warning("nmap not found — skipping port scan. Install with: sudo apt install nmap")
@@ -139,12 +183,53 @@ def port_scan(target):
     if not output:
         return {"error": "No output from nmap"}
  
-    cleaned = parse_nmap(output)
+    cleaned, services = parse_nmap(output)
 
-    print(F"{RESET} {cleaned}")
+    print(f"{RESET} {cleaned} \n")
     success("Port scan complete.")
 
-    return (cleaned)
+    return cleaned, services
+
+# ── MODULE 2: searchsploit ─────────────────────────────────────
+
+def run_searchsploit(services):
+    """
+    Run searchsploit using cleaned version string only.
+    Only saves results where exploits were found.
+    """
+    info("Starting searchsploit on discovered services ...")
+ 
+    if not check_tool("searchsploit"):
+        warning("searchsploit not found — skipping. Install: sudo apt install exploitdb")
+        return {}
+ 
+    findings = {}
+ 
+    for s in services:
+        version = s["version"].strip()
+        port    = s["port"].strip()
+ 
+        # Skip if no version to search
+        if not version or version.lower() == "tcpwrapped":
+            continue
+ 
+        # Search by version only e.g. "OpenSSH 5.3"
+        info(f"Searching exploits for: {version}")
+        output = run_cmd(f"searchsploit {version}")
+ 
+        # Skip if no results
+        if not output or "No Results" in output or "Exploits: No Results" in output:
+            continue
+ 
+        key = f"{port} — {version}"
+        findings[key] = output
+        success(f"Exploits found for {version}!")
+        print(output)
+ 
+    if not findings:
+        warning("No exploits found for any discovered service.")
+ 
+    return findings
 
 # ── MAIN ────────────────────────────────────────────────────
 def main():
@@ -159,18 +244,21 @@ def main():
 
     args = parser.parse_args()
  
-    target  = args.target
-    results = {}
+    # target  = args.target
+    # results = {}
 
     print("-" * 60)
     print(f"{BOLD}Target  :{RESET} {args.target}")
     print(f"{BOLD}Output  :{RESET} {args.output}")
     print("-" * 60)
 
-    results = port_scan(args.target)
+    nmap_results, services = port_scan(args.target)
+
+    searchsploit_results= {}
+    searchsploit_results = run_searchsploit(services)
 
     print("-" * 60)
-    save_report(target, results, args.output)
+    save_report(args.target, nmap_results, searchsploit_results, args.output)
 
 
 if __name__ == "__main__":
