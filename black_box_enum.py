@@ -62,8 +62,10 @@ def ensure_output_dir(path):
     os.makedirs(path, exist_ok=True)
 
 # ── REPORTER ────────────────────────────────────────────────
-def save_report(target, results, output_dir):
-    """Save results to a JSON file."""
+
+def save_report(target, nmap_output, output_dir):
+    """Save results """
+
     ensure_output_dir(output_dir)
     timestamp   = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_target = target.replace("http://", "").replace("https://", "").replace("/", "_")
@@ -72,11 +74,28 @@ def save_report(target, results, output_dir):
     report = {
         "target"    : target,
         "timestamp" : timestamp,
-        "results"   : results
+        "results"   : nmap_output
     }
  
     with open(filename, "w") as f:
-        json.dump(report, f, indent=4)
+        f.write("=" * 60 + "\n")
+        f.write("       BLACK BOX ENUMERATION REPORT\n")
+        f.write("=" * 60 + "\n")
+        f.write(f"  Target    : {target}\n")
+        f.write(f"  Date/Time : {timestamp}\n")
+        f.write("=" * 60 + "\n\n")
+
+        f.write("[PORT SCAN — NMAP]\n")
+        f.write("-" * 60 + "\n")
+        if nmap_output:
+            f.write(nmap_output + "\n")
+        else:
+            f.write("No results.\n")
+        f.write("\n")
+
+        f.write("=" * 60 + "\n")
+        f.write("  END OF REPORT\n")
+        f.write("=" * 60 + "\n")
  
     success(f"Report saved → {filename}")
 
@@ -101,6 +120,9 @@ def port_scan(target):
 
 # ── MAIN ────────────────────────────────────────────────────
 def main():
+    
+    print(BANNER)
+
     parser = argparse.ArgumentParser(
         description="Automated Black box Enumeration Tool"
     )
@@ -112,6 +134,7 @@ def main():
     target  = args.target
     results = {}
 
+    print("-" * 60)
     print(f"{BOLD}Target  :{RESET} {args.target}")
     print(f"{BOLD}Output  :{RESET} {args.output}")
     print("-" * 60)
