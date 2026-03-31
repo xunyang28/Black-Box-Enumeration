@@ -172,6 +172,9 @@ def save_report(target, nmap_output, exploit_findings, output_dir):
  
 def port_scan(target):
     """Run nmap port scan against target."""
+    print("\n" + "=" * 60 + "\n")
+    print(f"{RESET} NETWORK ENUMERATION")
+    print("=" * 60 + "\n")
     info(f"Starting port scan on {target} ... \n")
  
     if not check_tool("nmap"):
@@ -197,6 +200,10 @@ def run_searchsploit(services):
     Run searchsploit using cleaned version string only.
     Only saves results where exploits were found.
     """
+
+    print("\n" + "=" * 60 + "\n")
+    print(f"{RESET} VULNERABILITY SEARCH")
+    print("=" * 60 + "\n")
     info("Starting searchsploit on discovered services ...")
  
     if not check_tool("searchsploit"):
@@ -221,8 +228,8 @@ def run_searchsploit(services):
         if not output or "No Results" in output or "Exploits: No Results" in output:
             continue
  
-        key = f"{port} — {version}"
-        findings[key] = output
+        # key = f"{port} — {version}"
+        # findings[key] = output
         success(f"Exploits found for {version}!")
         print(output)
  
@@ -247,10 +254,10 @@ def main():
     # target  = args.target
     # results = {}
 
-    print("-" * 60)
+    print("=" * 60)
     print(f"{BOLD}Target  :{RESET} {args.target}")
     print(f"{BOLD}Output  :{RESET} {args.output}")
-    print("-" * 60)
+    print("=" * 60)
 
     nmap_results, services = port_scan(args.target)
 
