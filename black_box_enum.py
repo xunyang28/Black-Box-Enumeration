@@ -31,10 +31,10 @@ CYAN   = "\033[96m"
 RESET  = "\033[0m"
 BOLD   = "\033[1m"
 
-def info(msg):    print(f"{CYAN}[*]{RESET} {msg}")
-def success(msg): print(f"{GREEN}[+]{RESET} {msg}")
-def warning(msg): print(f"{YELLOW}[!]{RESET} {msg}")
-def error(msg):   print(f"{RED}[-]{RESET} {msg}")
+def info(msg):    print(f"{CYAN}[*] {msg}")
+def success(msg): print(f"{GREEN}[+] {msg}")
+def warning(msg): print(f"{YELLOW}[!] {msg}")
+def error(msg):   print(f"{RED}[-] {msg}")
 
 # ── UTILS ───────────────────────────────────────────────────
  
@@ -60,6 +60,31 @@ def check_tool(tool):
 def ensure_output_dir(path):
     """Create output directory if it doesn't exist."""
     os.makedirs(path, exist_ok=True)
+
+# ── PARSE OUTPUT ───────────────────────────────────────
+ 
+def parse_nmap(raw):
+    """Extract only the port table from nmap output."""
+    lines  = raw.splitlines()
+    result = []
+ 
+    for line in lines:
+        stripped = line.strip()
+ 
+        # Keep the PORT header line
+        if stripped.startswith("PORT") and "STATE" in stripped:
+            result.append(line)
+            continue
+ 
+        # Keep only lines that start with a port number e.g. 22/tcp
+        if "/" in stripped and len(stripped) > 0:
+            first_token = stripped.split()[0] if stripped.split() else ""
+            if "/" in first_token and (
+                first_token.endswith("tcp") or first_token.endswith("udp")
+            ):
+                result.append(line)
+ 
+    return "\n".join(result) if result else "No open ports found."
 
 # ── REPORTER ────────────────────────────────────────────────
 
@@ -114,9 +139,11 @@ def port_scan(target):
     if not output:
         return {"error": "No output from nmap"}
  
+    cleaned = parse_nmap(output)
+
     success("Port scan complete.")
-    print(output)
-    return {"raw": output}
+    print(cleaned)
+    return (cleaned)
 
 # ── MAIN ────────────────────────────────────────────────────
 def main():
