@@ -88,7 +88,7 @@ def save_report(target, nmap_output, output_dir):
         f.write("[PORT SCAN — NMAP]\n")
         f.write("-" * 60 + "\n")
         if nmap_output:
-            f.write(nmap_output + "\n")
+            f.write(nmap_output)
         else:
             f.write("No results.\n")
         f.write("\n")
