@@ -103,7 +103,7 @@ def save_report(target, nmap_output, output_dir):
     }
  
     with open(filename, "w") as f:
-        f.write("=" * 60 + "\n")
+        f.write("\n" + "=" * 60 + "\n")
         f.write("       BLACK BOX ENUMERATION REPORT\n")
         f.write("=" * 60 + "\n")
         f.write(f"  Target    : {target}\n")
@@ -141,8 +141,9 @@ def port_scan(target):
  
     cleaned = parse_nmap(output)
 
+    print(F"{RESET} {cleaned}")
     success("Port scan complete.")
-    print(cleaned)
+
     return (cleaned)
 
 # ── MAIN ────────────────────────────────────────────────────
