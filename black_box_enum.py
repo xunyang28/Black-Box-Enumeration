@@ -80,6 +80,25 @@ def clean_version(version_str):
     words = version_str.split()
     return " ".join(words[:3])
 
+def run_cmd_searchsploit(cmd):
+    """
+    Run searchsploit specifically — combines stdout + stderr
+    because searchsploit writes its table to stderr, not stdout.
+    """
+    try:
+        result = subprocess.run(
+            cmd, shell=True, capture_output=True, text=True, timeout=180
+        )
+        # Combine both streams so we never miss output
+        combined = (result.stdout + result.stderr).strip()
+        return combined
+    except subprocess.TimeoutExpired:
+        warning(f"Command timed out: {cmd}")
+        return ""
+    except Exception as e:
+        error(f"Command failed: {e}")
+        return ""
+
 # ── PARSE OUTPUT ───────────────────────────────────────
  
 def parse_nmap(raw):
@@ -138,6 +157,10 @@ def save_report(target, nmap_output, exploit_findings, output_dir):
         f.write("\n" + "=" * 60 + "\n")
         f.write("       BLACK BOX ENUMERATION REPORT\n")
         f.write("=" * 60 + "\n")
+
+        #==========================================================
+        # Network Scanning Reports
+        # =========================================================
         f.write(f"  Target    : {target}\n")
         f.write(f"  Date/Time : {timestamp}\n")
         f.write("=" * 60 + "\n\n")
@@ -150,7 +173,9 @@ def save_report(target, nmap_output, exploit_findings, output_dir):
             f.write("No results.\n")
         f.write("\n")
 
-        # Searchsploit results
+        #==========================================================
+        # searchsloitReports
+        # =========================================================
         f.write("[SEARCHSPLOIT — EXPLOIT FINDINGS]\n")
         f.write("-" * 60 + "\n")
         if exploit_findings:
@@ -172,9 +197,9 @@ def save_report(target, nmap_output, exploit_findings, output_dir):
  
 def port_scan(target):
     """Run nmap port scan against target."""
-    print("\n" + "=" * 60 + "\n")
-    print(f"{RESET} NETWORK ENUMERATION")
-    print("=" * 60 + "\n")
+   
+    print(f"\n {RESET} NETWORK ENUMERATION")
+    print("-" * 60 + "\n")
     info(f"Starting port scan on {target} ... \n")
  
     if not check_tool("nmap"):
@@ -202,7 +227,7 @@ def run_searchsploit(services):
     """
 
     print("\n" + "=" * 60 + "\n")
-    print(f"{RESET} VULNERABILITY SEARCH")
+    print(f"{RESET} Vulnerability Service Version SEARCH")
     print("=" * 60 + "\n")
     info("Starting searchsploit on discovered services ...")
  
@@ -211,6 +236,7 @@ def run_searchsploit(services):
         return {}
  
     findings = {}
+    searched  = set()
  
     for s in services:
         version = s["version"].strip()
@@ -219,17 +245,22 @@ def run_searchsploit(services):
         # Skip if no version to search
         if not version or version.lower() == "tcpwrapped":
             continue
+
+         # Skip duplicate version queries
+        if version in searched:
+            continue
+        searched.add(version)
  
         # Search by version only e.g. "OpenSSH 5.3"
         info(f"Searching exploits for: {version}")
-        output = run_cmd(f"searchsploit {version}")
+        output = run_cmd_searchsploit(f"searchsploit {version}")
  
         # Skip if no results
         if not output or "No Results" in output or "Exploits: No Results" in output:
             continue
  
-        # key = f"{port} — {version}"
-        # findings[key] = output
+        key = f"{port} — {version}"
+        findings[key] = output
         success(f"Exploits found for {version}!")
         print(output)
  
