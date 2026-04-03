@@ -87,11 +87,15 @@ def run_cmd_searchsploit(cmd):
     """
     try:
         result = subprocess.run(
-            cmd, shell=True, capture_output=True, text=True, timeout=180
-        )
+    		["searchsploit"] + cmd.split(),
+    		stdout=subprocess.PIPE,
+    		stderr=subprocess.PIPE,
+    		text=True
+)
         # Combine both streams so we never miss output
         combined = (result.stdout + result.stderr).strip()
         return combined
+        
     except subprocess.TimeoutExpired:
         warning(f"Command timed out: {cmd}")
         return ""
@@ -145,7 +149,7 @@ def save_report(target, nmap_output, exploit_findings, output_dir):
     ensure_output_dir(output_dir)
     timestamp   = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_target = target.replace("http://", "").replace("https://", "").replace("/", "_")
-    filename    = os.path.join(output_dir, f"scan_{safe_target}_{timestamp}.json")
+    filename    = os.path.join(output_dir, f"{safe_target}.txt")
  
     report = {
         "target"    : target,
@@ -236,7 +240,7 @@ def run_searchsploit(services):
         return {}
  
     findings = {}
-    searched  = set()
+    # searched  = set()
  
     for s in services:
         version = s["version"].strip()
@@ -245,27 +249,28 @@ def run_searchsploit(services):
         # Skip if no version to search
         if not version or version.lower() == "tcpwrapped":
             continue
-
-         # Skip duplicate version queries
-        if version in searched:
-            continue
-        searched.add(version)
  
         # Search by version only e.g. "OpenSSH 5.3"
-        info(f"Searching exploits for: {version}")
-        output = run_cmd_searchsploit(f"searchsploit {version}")
+        info(f"Searching exploits for: {version}\n")
+        output = run_cmd_searchsploit(version)
  
-        # Skip if no results
-        if not output or "No Results" in output or "Exploits: No Results" in output:
+        if not output:
+            warning(f"Empty output for: {version}")
             continue
- 
+ 	
+ 	# Skip if no exploits found
+        if "Exploits: No Results" in output and "Shellcodes: No Results" in output:
+            warning(f"Couldn't find any exploit for {version}! \n")
+            continue
+            
+        print(output)
         key = f"{port} — {version}"
         findings[key] = output
-        success(f"Exploits found for {version}!")
-        print(output)
+        success(f"Exploits found for {version}!\n")
+        
  
     if not findings:
-        warning("No exploits found for any discovered service.")
+        warning("No exploits found for any discovered service.\n")
  
     return findings
 
