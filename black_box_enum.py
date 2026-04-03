@@ -7,6 +7,7 @@ import argparse
 import subprocess
 import re
 import os
+import ftplib
 from datetime import datetime
 
 
@@ -102,6 +103,29 @@ def run_cmd_searchsploit(cmd):
     except Exception as e:
         error(f"Command failed: {e}")
         return ""
+    
+def run_cmd_ftp(cmd):
+    """
+    Run searchsploit specifically — combines stdout + stderr
+    because searchsploit writes its table to stderr, not stdout.
+    """
+    try:
+        result = subprocess.run(
+    		["searchsploit"] + cmd.split(),
+    		stdout=subprocess.PIPE,
+    		stderr=subprocess.PIPE,
+    		text=True
+)
+        # Combine both streams so we never miss output
+        combined = (result.stdout + result.stderr).strip()
+        return combined
+        
+    except subprocess.TimeoutExpired:
+        warning(f"Command timed out: {cmd}")
+        return ""
+    except Exception as e:
+        error(f"Command failed: {e}")
+        return ""
 
 # ── PARSE OUTPUT ───────────────────────────────────────
  
@@ -129,12 +153,14 @@ def parse_nmap(raw):
 
                 parts = stripped.split()
                 port = parts[0] if len(parts) > 0 else ""
+                service = parts[2] if len(parts) > 2 else ""
                 version = " ".join(parts[3:]) if len(parts) > 3 else ""
 
                 clean_ver = clean_version(version)
 
                 services.append({
                     "port"    : port,
+                    "service" : service,
                     "version" : clean_ver
                 })
     
@@ -143,7 +169,7 @@ def parse_nmap(raw):
 
 # ── REPORTER ────────────────────────────────────────────────
 
-def save_report(target, nmap_output, exploit_findings, output_dir):
+def save_report(target, nmap_output, exploit_findings, dir_findings, output_dir):
     """Save results """
 
     ensure_output_dir(output_dir)
@@ -159,15 +185,15 @@ def save_report(target, nmap_output, exploit_findings, output_dir):
  
     with open(filename, "w") as f:
         f.write("\n" + "=" * 60 + "\n")
-        f.write("       BLACK BOX ENUMERATION REPORT\n")
-        f.write("=" * 60 + "\n")
+        f.write("\tBLACK BOX ENUMERATION REPORT\n")
+        f.write("=" * 60 + "\n" + "\n")
 
         #==========================================================
         # Network Scanning Reports
         # =========================================================
         f.write(f"  Target    : {target}\n")
         f.write(f"  Date/Time : {timestamp}\n")
-        f.write("=" * 60 + "\n\n")
+        f.write("\n" + "=" * 60 + "\n")
 
         f.write("[PORT SCAN — NMAP]\n")
         f.write("-" * 60 + "\n")
@@ -184,11 +210,25 @@ def save_report(target, nmap_output, exploit_findings, output_dir):
         f.write("-" * 60 + "\n")
         if exploit_findings:
             for service_key, output in exploit_findings.items():
-                f.write(f"\n  >> {service_key}\n")
-                f.write("  " + "-" * 40 + "\n")
+                f.write(f"\n{service_key}\n")
+                f.write("-" * 60 + "\n")
                 f.write(output + "\n")
         else:
             f.write("  No exploits found for discovered services.\n")
+        f.write("\n")
+
+        #==========================================================
+        # Directory Port Researching
+        # =========================================================
+        f.write("Web Directory Brute Forcing\n")
+        f.write("\n"+ "-" * 60 + "\n")
+        if dir_findings:
+            for service_key, output in dir_findings.items():
+                f.write(f"\nPort: {service_key}\n")
+                f.write("-" * 60 + "\n")
+                f.write(output + "\n")
+        else:
+            f.write("No directory found for discovered services.\n")
         f.write("\n")
 
         f.write("=" * 60 + "\n")
@@ -222,7 +262,7 @@ def port_scan(target):
 
     return cleaned, services
 
-# ── MODULE 2: searchsploit ─────────────────────────────────────
+# ── MODULE 2: searchsploit ──────────────────────────────────
 
 def run_searchsploit(services):
     """
@@ -251,7 +291,7 @@ def run_searchsploit(services):
             continue
  
         # Search by version only e.g. "OpenSSH 5.3"
-        info(f"Searching exploits for: {version}\n")
+        info(f"Searching exploits for: {version}")
         output = run_cmd_searchsploit(version)
  
         if not output:
@@ -263,7 +303,7 @@ def run_searchsploit(services):
             warning(f"Couldn't find any exploit for {version}! \n")
             continue
             
-        print(output)
+        print(f"{RESET} {output}")
         key = f"{port} — {version}"
         findings[key] = output
         success(f"Exploits found for {version}!\n")
@@ -273,6 +313,151 @@ def run_searchsploit(services):
         warning("No exploits found for any discovered service.\n")
  
     return findings
+
+# ── MODULE 3: FTP Enumeration ─────────────────────────────────────
+ 
+def ftp_enum(target, services):
+    """
+    FTP enumeration — tries anonymous login by default.
+    If connected:
+      - Lists all files
+      - Downloads all files (mget *)
+      - Tests upload permission
+    """
+   
+    print(f"\n {RESET} FTP ENUMERATION")
+    print("-" * 60 + "\n")
+
+    ftp_finding={}
+
+    for s in services:
+        service = s["service"]. strip()
+        port    = s["port"].strip().split("/")[0]
+        int_port = int(port)
+
+        if service in ("ftp", "ftps", "tftp", "ftp-data"):
+            info(f"FOUND ftp service on {port} - Attempting Anonymous Login \n")
+            info(f"Connecting to FTP {target}:{port} as anonymous")
+
+            try:
+                # ==================== Connect and Login =======================
+                ftp = ftplib.FTP()
+                ftp.connect(target, int_port, timeout=10)
+                ftp.login("anonymous", "anonymous")
+                success(f"Login successful as anonymous!")
+                ftp_finding[f"{port} - login"] = f"Login successful as anonymous"
+
+                # ===================== List File ==============================
+                info(f"Listing Files")
+                files = ftp.nlst()
+                if files:
+                    success(f"Found {len(files)} file(s): ")
+                    for f in files:
+                        print(f"{RESET} {f}")
+                    ftp_finding[f"{port} — listing"] = "\n".join(files)
+                else:
+                    warning("Directory is empty.")
+
+                # ── STEP 3: Download all files (mget *) ────
+                info("Downloading all files ...")
+                download_dir = f"ftp_loot/{target}_{port}"
+                os.makedirs(download_dir, exist_ok=True)
+
+                downloaded = []
+                for filename in files:
+                    try:
+                        local_path = os.path.join(download_dir, filename)
+                        with open(local_path, "wb") as lf:
+                            ftp.retrbinary(f"RETR {filename}", lf.write)
+                        downloaded.append(filename)
+                        success(f"Downloaded → {local_path}")
+                    except Exception:
+                        warning(f"Could not download {filename} — skipping.")
+
+                ftp_finding[f"{port} — downloaded"] = "\n".join(downloaded) if downloaded else "Nothing downloaded."
+
+                # ── STEP 4: Test upload ─────────────────────
+                info("Testing upload permission ...")
+                test_file = "test.txt"
+                with open(test_file, "w") as tf:
+                    tf.write("upload test - blackbox_enum\n")
+
+                try:
+                    with open(test_file, "rb") as tf:
+                        ftp.storbinary(f"STOR {test_file}", tf)
+                    success("Upload SUCCESSFUL — FTP is writable!")
+                    ftp_finding[f"{port} — upload"] = "WRITABLE — upload succeeded."
+                except Exception:
+                    warning("Upload failed — FTP is read-only.")
+                    ftp_finding[f"{port} — upload"] = "Read-only — upload failed."
+
+                os.remove(test_file)
+                ftp.quit()
+
+            except ftplib.error_perm as e:
+                warning(f"Login failed: {e}")
+                ftp_finding[f"{port} — login"] = f"Login failed: {e}"
+            except Exception as e:
+                error(f"FTP connection error: {e}")
+
+        return ftp_finding
+            
+        #     if not check_tool("ftp"):
+        #         warning("ftp not found — skipping port scan. Install with: sudo apt install ftp")
+        #         return {"error": "ftp not installed"}
+    
+        #     output = run_cmd(f"ftp $ip")
+
+        #     print(f"{RESET} {output}")
+
+        #     if not output:
+        #         return {"error": "No output from gobuster"}
+            
+        #     key = f"{port}"
+        #     ftp_finding[key] = output
+        #     success(f"Hidden Directory found for {port}!\n")
+
+        # else:
+        #     continue
+
+    # return ftp_finding
+
+# ── MODULE 4: Web Directory BruteForcing ─────────────────────────────────────
+ 
+def directory_bruteforcing(target, services):
+    """Run directory brute forcing against target."""
+   
+    print(f"\n {RESET} Web Directory Brute Forcing")
+    print("-" * 60 + "\n")
+
+    dir_finding={}
+
+    for s in services:
+        service = s["service"]. strip()
+        port    = s["port"].strip().split("/")[0]
+
+        if service in ("http", "https", "http-alt", "http-proxy", "http-mgmt") or "http" in service or "ssl" in service:
+            info(f"Starting web directory bruteforcing on {port} ... \n")
+            
+            if not check_tool("gobuster"):
+                warning("nmap not found — skipping port scan. Install with: sudo apt install gobuster")
+                return {"error": "gobuster not installed"}
+    
+            output = run_cmd(f"gobuster dir -u http://{target}:{port} -w /usr/share/wordlists/dirb/common.txt -t 42")
+
+            print(f"{RESET} {output}")
+
+            if not output:
+                return {"error": "No output from gobuster"}
+            
+            key = f"{port}"
+            dir_finding[key] = output
+            success(f"Hidden Directory found for {port}!\n")
+
+        else:
+            continue
+
+    return dir_finding
 
 # ── MAIN ────────────────────────────────────────────────────
 def main():
@@ -295,13 +480,22 @@ def main():
     print(f"{BOLD}Output  :{RESET} {args.output}")
     print("=" * 60)
 
+    # Execute Network Scanning
     nmap_results, services = port_scan(args.target)
 
+    # Execute version vulnerability search
     searchsploit_results= {}
     searchsploit_results = run_searchsploit(services)
 
+    # FTP enumeration
+    ftp_results = {}
+    ftp_results = ftp_enum(args.target, services)
+
+    # Directory Brute Forcing
+    dir_search_results = directory_bruteforcing(args.target, services)
+
     print("-" * 60)
-    save_report(args.target, nmap_results, searchsploit_results, args.output)
+    save_report(args.target, nmap_results, searchsploit_results, dir_search_results, args.output)
 
 
 if __name__ == "__main__":
